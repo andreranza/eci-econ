@@ -1,0 +1,394 @@
+library(tidyverse)
+library(lubridate)
+library(readxl)
+
+#### ECI - THE OBSERVATORY OF ECONOMIC COMPLEXITY ####
+eci <- read_csv("data/eci_country_rankings.csv")
+
+countries <- read_csv("data/world_bank.csv") %>% 
+  select("Country Name", "Country Code") %>% 
+  rename("country_name" = "Country Name", "country_code" = "Country Code") %>% 
+  distinct() %>% 
+  slice(1:11) %>% 
+  pull("country_name") %>% 
+  str_replace("Slovak Republic", "Slovakia") %>% 
+  sort()
+
+years <- seq(1993, 2017)
+
+eci_countries <- eci %>% 
+  select(-c("ECI+", "Country ID")) %>% 
+  filter(Country %in% countries,
+         Year %in% years) %>% 
+  arrange(Country) %>% 
+  mutate(Year = str_c(Year, "01", "01", sep = "-")) %>% 
+  mutate(Year = as.Date(Year, format = "%Y-%m-%d"))
+
+eci <- eci_countries %>% 
+  pivot_wider(names_from = Country, values_from = ECI)
+print(eci, n = Inf)
+
+ggplot(eci_countries, aes(x = Year, y = ECI)) + 
+  geom_line() +
+  facet_wrap(~ Country, nrow = 3, ncol = 5) +
+  labs(title = "ECI Dynamics",
+       subtitle = "1993 - 2017",
+       caption = "Source: 'OEC - The Observatory of Economic Complexity'") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+  
+ggsave("eci_facet.png",
+        device = "png", path = "plots",
+        dpi = 320, units = "mm", width = 297, height = 210)
+
+#### POPULATION ####
+pop <- read_csv("data/population.csv")
+colss_pop <- colnames(pop)[-c(2,3,4)]
+pop <- pop %>% 
+  select(all_of(colss_pop)) %>% 
+  slice(1:11) %>% 
+  gather(all_of(colss_pop[-1]), key = "year", value = "pop") %>% 
+  mutate(year = str_replace_all(year, " \\[YR\\d{4}\\]", ""),
+         year = as.double(year)) %>% 
+  rename(country_name = `Country Name`) %>% 
+  arrange(country_name) %>% 
+  mutate(country_name = str_replace_all(country_name, "Slovak Republic", "Slovakia"))
+
+pop_panel <- pop %>% pivot_wider(names_from = country_name, values_from = pop)
+print(pop_panel, n = Inf)
+
+#### FDI ####
+fdi <- read_csv("data/fdi.csv")
+fdi <- fdi %>% 
+  select(-c("2018 [YR2018]", "2019 [YR2019]", 
+            "Country Code", 
+            "1990 [YR1990]", "1991 [YR1991]",
+            "1992 [YR1992]")) %>% 
+  rename(series_code = `Series Code`,
+         series_name = `Series Name`,
+         country_name = `Country Name`) %>% 
+  filter(str_detect(series_code, "BX.KLT.DINV.CD.WD")) %>% 
+  select(-c("series_name", "series_code")) %>% 
+  mutate(country_name = str_replace_all(country_name, "Slovak Republic", "Slovakia"))
+print(fdi, n = Inf)
+colss <- colnames(fdi)[-1]
+
+fdi_gg <- fdi %>% 
+  gather(all_of(colss), key = "year", value = "fdi") %>% 
+  mutate(year = str_replace_all(year, " \\[YR\\d{4}\\]", "")) %>% 
+  mutate(year = as.double(year),
+         fdi = as.double(fdi)) %>% 
+  arrange(country_name)
+print(fdi_gg, n = Inf)
+nrow(fdi_gg) == nrow(pop)
+
+fdi_panel <- fdi_gg %>% 
+  pivot_wider(names_from = country_name, values_from = fdi)
+print(fdi_panel, n = Inf)
+
+#### JOIN POP - FDI ####
+fdi_pop <- inner_join(pop, fdi_gg) %>% 
+  mutate(fdi_cap = fdi/pop,
+         year = as.double(year)) %>% 
+  mutate(year = str_c(year, "01", "01", sep = "-")) %>% 
+  mutate(year = as.Date(year, format = "%Y-%m-%d"))
+print(fdi_pop, n = Inf)
+
+ggplot(fdi_pop, aes(x = year, y = fdi_cap)) + 
+  geom_line() +
+  facet_wrap(~ country_name, nrow = 3, ncol = 5) +
+  labs(title = "Foreign Direct Investments per capita Dynamics",
+       subtitle = "1993 - 2017",
+       caption = "Source: 'The World Bank'",
+       y = "FDI per capita",
+       x = "Year") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+ggsave("fdi_pop_facet.png",
+       device = "png", path = "plots",
+       dpi = 320, units = "mm", width = 297, height = 210)
+
+ggplot(fdi_pop, aes(x = year, y = fdi_cap)) + 
+  geom_line() +
+  facet_wrap(~ country_name, nrow = 3, ncol = 5) +
+  labs(title = "Foreign Direct Investments per capita Dynamics (Log Scale)",
+       subtitle = "1993 - 2017",
+       caption = "Source: 'The World Bank'",
+       y = "FDI per capita",
+       x = "Year") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  scale_y_log10()
+
+ggsave("fdi_pop_facet_log.png",
+       device = "png", path = "plots",
+       dpi = 320, units = "mm", width = 297, height = 210)
+
+#### FDI PER CAPITA ####
+fdi_pop_panel <- fdi_pop %>% 
+  group_by(country_name) %>% 
+  mutate(id = row_number()) %>% 
+  select(-c(3,4)) %>% 
+  pivot_wider(names_from = country_name, values_from = fdi_cap) %>% 
+  select(-id)
+print(fdi_pop_panel, n = Inf)
+
+#### VARIOUS - WORLD DEVELOPEMENT INDICATOR ####
+data <- read_csv("data/gdp_edu_trade_infl.csv") %>% 
+  rename(country_name = `Country Name`,
+         series_name = `Series Name`)
+
+varss <- colnames(data)
+data_b <- data %>% 
+  select(varss[c(1, 3, seq(8, length(varss)))]) %>% 
+  mutate_at(varss[seq(8, length(varss))], as.double) %>% 
+  slice(- which(str_detect(country_name, "(Last)|(from)"))) %>% 
+  gather(all_of(colss), key = "year", value = "value") %>% 
+  mutate(year = str_replace_all(year, " \\[YR\\d{4}\\]", ""),
+         year = as.double(year)) %>% 
+  arrange(country_name)
+
+#### GDP per capita, PPP (current international $) ####
+gdp <- data_b %>% 
+  filter(str_detect(series_name, "(GDP per capita\\,\\sPPP\\s\\(constant)")) %>% 
+  pivot_wider(names_from = country_name, values_from = value) %>% 
+  select(-series_name)
+print(gdp, n = Inf)
+
+#### GDP ####
+gdp_b <- read_csv("data/gdp.csv")
+glimpse(gdp_b)
+
+#### GROSS FIXED CAPITAL - WORLD BANK INDICATOR ####
+capital <- read_csv("data/gross_fixed_capital.csv")
+glimpse(capital)
+
+# #### EDUCATION GOV. EXPENDITURE ####
+# edu <- data_b %>% 
+#   filter(str_detect(series_name, "education")) %>% 
+#   pivot_wider(names_from = country_name, values_from = value) %>% 
+#   select(-series_name)
+# print(edu, n = Inf)
+
+#### INFLATION, GDP DEFLATOR - OECD ####
+infl <- data_b %>% 
+  filter(str_detect(series_name, "Inflation")) %>% 
+  pivot_wider(names_from = country_name, values_from = value) %>% 
+  select(-1)
+print(infl, n = Inf)
+
+#### HUMAN CAPITAL PER PERSON - FRED PEN WORLD 9.0 ####
+paths <- list.files("data/human_capital_index")
+cols_names <- str_replace_all(paths, "_human_index.csv","")
+human <- map(paths, ~ read_csv(str_c("data/", "human_capital_index/", .x)))
+
+human <- set_names(human, paths) %>% 
+  map(~ filter(.x, DATE > "1992-01-01", DATE < "2018-01-01")) %>% 
+  map_dfc(~ select(.x, -1)) %>% 
+  mutate(date = as.double(seq(from = 1993, to = 2017))) %>% 
+  select(date, everything())
+
+colnames(human)[2:12] <- cols_names
+print(human, n = Inf)
+
+#### PRIVATE CREDIT DB ####
+fin_str <- read_xlsx("data/FinancialStructureDatabase20191018.xlsx", sheet = 3)
+
+countries_fin <- str_replace(countries, "Slovakia", "Slovak Republic")
+fin_str <- fin_str %>% 
+  filter(COUNTRY %in% countries_fin,
+         YEAR > 1992, YEAR < 2018) %>% 
+  select("PRIVATE CREDIT BY DEPOSIT MONEY BANKS AND OTHER FINANCIAL INSTITUTIONS to GDP (%)",
+         "COUNTRY", "YEAR") %>% 
+  select(YEAR, COUNTRY, everything()) %>% 
+  pivot_wider(names_from = "COUNTRY", 
+              values_from = "PRIVATE CREDIT BY DEPOSIT MONEY BANKS AND OTHER FINANCIAL INSTITUTIONS to GDP (%)") %>% 
+  mutate_all(~ as.double(.))
+print(fin_str, n = Inf)
+write_csv(fin_str, "data/private_credit.csv")
+
+#### TRADE (% of GDP) - WORLD BANK INDICATORS ####
+wdi <- read_csv("data/WDIData.csv")
+
+# Find all the Indicator_Name that have "trade" in their name
+wdi[str_detect(wdi$Indicator_Name, "(trade)|(Trade)"), ] %>% 
+  distinct(Indicator_Name)
+
+trade <- wdi %>% 
+  select("Country_Name", "Indicator_Name", as.character(seq(1992, 2018))) %>% 
+  filter(Indicator_Name == "Trade (% of GDP)",
+         Country_Name %in% c(countries, "Slovak Republic")) %>% 
+  select(-2)
+print(trade)
+
+#### RULE OF LAW ####
+law <- read_csv("data/rule_of_law.csv")
+
+#### INDEX OF ECONOMIC FREEDOM - HERITAGE ####
+freedom <- read_csv("data/economic_freedom_index.csv") %>% 
+  select(c(1,2,3)) %>% 
+  mutate(country = str_replace_all(country, " ", ""),
+         score = as.double(score)) %>% 
+  filter(year > 1995, year < 2018) %>% 
+  select(year, country, everything()) %>% 
+  arrange(country)
+print(freedom, inf = Inf)
+
+
+#### GMM MODEL ####
+library(plm)
+
+# Set the data in the way needed by GMM model from "plm" pkg  #
+eci_model <- eci %>% 
+  rename(year = Year) %>% 
+  pivot_longer(cols = colnames(eci)[-1], names_to = "country", values_to = "eci") %>% 
+  mutate(country = str_replace_all(country, " ", ""),
+         year = as.double(year(year)))
+print(eci_model, n = 11)
+
+pop_model <- pop_panel %>% 
+  pivot_longer(cols = colnames(pop_panel)[-1], names_to = "country", values_to = "population") %>% 
+  mutate(country = str_replace_all(country, " ", ""))
+print(pop_model, n = 11)
+
+fdi_model <- fdi_panel %>% 
+  pivot_longer(cols = colnames(fdi_panel)[-1], names_to = "country", values_to = "fdi") %>% 
+  mutate(country = str_replace_all(country, " ", ""))
+print(fdi_model, n = 11)
+
+freedom_model <- freedom %>% 
+  rename(economic_freedom = score)
+
+gdp_model <- gdp %>% 
+  pivot_longer(cols = colnames(gdp)[-1], names_to = "country", values_to = "gdp_pc") %>% 
+  mutate(country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", ""))
+print(gdp_model, n = 11)
+
+gdp_model_b <- gdp_b %>% 
+  select(-c(2,3,4)) %>% 
+  slice(1:11) %>% 
+  rename_all(~ str_replace_all(., " \\[YR\\d{4}\\]", "")) %>% 
+  rename(country = "Country Name") %>% 
+  pivot_longer(cols = c(2:23), values_to = "gdp", names_to = "year") %>% 
+  select(year, country, everything()) %>% 
+  mutate(year = as.double(year),
+         country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", ""))
+print(gdp_model_b, n = Inf)
+
+inf_model <- infl %>% 
+  pivot_longer(cols = colnames(infl)[-1], names_to = "country", values_to = "inflation") %>% 
+  mutate(country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", ""),
+         inflation = as.double(inflation))
+print(inf_model, n = 11)
+
+law_model <- law %>% 
+  select(-c(2,3,4)) %>% 
+  slice(1:11) %>% 
+  rename_all(~ str_replace_all(., " \\[YR\\d{4}\\]", "")) %>% 
+  rename(country = `Country Name`) %>% 
+  pivot_longer(cols = c(2:20), names_to = "year", values_to = "rule_of_law") %>% 
+  select(year, country, everything()) %>% 
+  mutate(year = as.double(year),
+         country = str_replace_all(country, " ", ""),
+         country = str_replace_all(country, "SlovakRepublic", "Slovakia"))
+print(law_model, n = Inf)
+sum(is.na(law_model$rule_of_law)) # 0
+
+capital_model <- capital %>% 
+  slice(1:11) %>% 
+  select(-c(2,3,4)) %>% 
+  rename_all(~ str_replace_all(., " \\[YR\\d{4}\\]", "")) %>% 
+  rename(country = "Country Name") %>% 
+  pivot_longer(cols = c(2:23), names_to = "year", values_to = "gross_fix_cap") %>% 
+  select(year, country, everything()) %>% 
+  mutate(country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", ""),
+         year = as.double(year))
+print(capital_model, n = Inf)
+
+trade_model <- trade %>% 
+  pivot_longer(cols = colnames(trade)[-1], names_to = "year", values_to = "trade_openness") %>% 
+  rename(country = Country_Name) %>% 
+  mutate(country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", ""),
+         year = as.double(year)) %>% 
+  select(year, country, everything())
+print(trade_model, n = Inf)
+
+human_model <- human %>% 
+  pivot_longer(cols = colnames(human)[-1], names_to = "country", values_to = "human_capital") %>%
+  rename(year = date) %>% 
+  mutate(country = str_to_title(country),
+         country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, "_", ""),
+         country = str_replace_all(country, "Czechrepublic", "CzechRepublic"))
+print(human_model, n = Inf)
+
+fin_model <- fin_str %>% 
+  pivot_longer(cols = colnames(fin_str)[-1], names_to = "country", values_to = "private_sec_cred") %>% 
+  mutate(country = str_replace_all(country, "Slovak Republic", "Slovakia"),
+         country = str_replace_all(country, " ", "")) %>% 
+  rename(year = YEAR)
+print(fin_model, n = 11)
+
+
+#### DATASET FOR THE GMM MODEL ####
+
+data_model <- left_join(eci_model, pop_model, by = c("year", "country")) %>% 
+  left_join(gdp_model, by = c("year", "country")) %>% 
+  left_join(gdp_model_b, by = c("year", "country")) %>% 
+  left_join(inf_model, by = c("year", "country")) %>%
+  left_join(freedom_model, by = c("year", "country")) %>% 
+  left_join(capital_model, by = c("year", "country")) %>% 
+  left_join(trade_model, by = c("year", "country")) %>% 
+  left_join(fdi_model, by = c("year", "country")) %>% 
+  left_join(human_model, by = c("year", "country")) %>% 
+  left_join(fin_model, by = c("year", "country")) %>% 
+  left_join(law_model, by = c("year", "country")) %>% 
+  # Year as Date type
+  # mutate(year = as.character(year),
+  #        year = str_c(year, "01", "01", sep = "-"),
+  #        year = ymd(year)) %>% 
+  # Normalize ECI #
+  mutate(eci_norm = (eci - min(eci))/(max(eci) - min(eci))) %>% 
+  # Ratio FDI/GDP
+  mutate(fdi_gdp = fdi/gdp) %>% 
+  # Logistic transformation ECI
+  #mutate(eci = log(eci/(1 - eci))) %>% 
+  # Fill NA in law column with most recent non-NA values
+  fill(rule_of_law) %>% 
+  # Fill NA in fin_str column with mean of th previous and next value
+  replace_na(list(private_sec_cred = ((83.4 + 94.5)/2), ((58.1 + 57.7)/2))) %>% 
+  arrange(country) %>% 
+  #filter(year > "1995-01-01") %>% 
+  filter(year > 1995) %>% 
+  #mutate(year = as_factor(year)) %>% 
+  select(year, country, eci, eci_norm, everything())
+
+glimpse(data_model)
+
+# Check for NA in each column
+sum(apply(data_model, MARGIN = 2, is.na)) 
+
+write_csv(data_model, path = "data/final_dataset.csv")
+
+# STATA format
+library(haven)
+write_dta(data = data_model, path = "data/final_dataset_stata.dta")
+
+#### GMM MODEL ####
+z2 <- pgmm(log(eci) ~ lag(log(eci), 1) + log(human_capital) + log(gdp) + log(gross_fix_cap) + log(fdi) | 
+             lag(log(eci), 2:99) + lag(log(fdi), 2:99) + lag(log(gdp), 2:99), 
+           data = data_model, effect = "individual", model = "onestep", transformation = "ld")
+
+summary(z2)
+coefficients(z2)
+
+
